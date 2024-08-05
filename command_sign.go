@@ -14,7 +14,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func commandSign() error {
+func commandSign(reader io.Reader, writer io.Writer, statusWriter io.Writer) error {
 	userIdent, err := findUserIdentity()
 	if err != nil {
 		return errors.Wrap(err, "failed to get identity matching specified user-id")
@@ -24,9 +24,9 @@ func commandSign() error {
 	}
 
 	// Git is looking for "\n[GNUPG:] SIG_CREATED ", meaning we need to print a
-	// line before SIG_CREATED. BEGIN_SIGNING seems appropraite. GPG emits this,
+	// line before SIG_CREATED. BEGIN_SIGNING seems appropriate. GPG emits this,
 	// though GPGSM does not.
-	sBeginSigning.emit()
+	sBeginSigning.emit(statusWriter)
 
 	cert, err := userIdent.Certificate()
 	if err != nil {
@@ -38,18 +38,17 @@ func commandSign() error {
 		return errors.Wrap(err, "failed to get idenity signer")
 	}
 
-	var f io.ReadCloser
+	var messageFile *os.File = nil
 	if len(fileArgs) == 1 {
-		if f, err = os.Open(fileArgs[0]); err != nil {
+		if messageFile, err = os.Open(fileArgs[0]); err != nil {
 			return errors.Wrapf(err, "failed to open message file (%s)", fileArgs[0])
 		}
-		defer f.Close()
-	} else {
-		f = stdin
+		defer messageFile.Close()
+		reader = messageFile
 	}
 
 	dataBuf := new(bytes.Buffer)
-	if _, err = io.Copy(dataBuf, f); err != nil {
+	if _, err = io.Copy(dataBuf, reader); err != nil {
 		return errors.Wrap(err, "failed to read message from stdin")
 	}
 
@@ -86,15 +85,15 @@ func commandSign() error {
 		return errors.Wrap(err, "failed to serialize signature")
 	}
 
-	emitSigCreated(cert, *detachSignFlag)
+	emitSigCreated(statusWriter, cert, *detachSignFlag)
 
 	if *armorFlag {
-		err = pem.Encode(stdout, &pem.Block{
+		err = pem.Encode(writer, &pem.Block{
 			Type:  "SIGNED MESSAGE",
 			Bytes: der,
 		})
 	} else {
-		_, err = stdout.Write(der)
+		_, err = writer.Write(der)
 	}
 	if err != nil {
 		return errors.New("failed to write signature")

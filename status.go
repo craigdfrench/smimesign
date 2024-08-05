@@ -4,8 +4,8 @@ import (
 	"crypto"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"os"
-	"sync"
 	"time"
 
 	"golang.org/x/crypto/openpgp/packet"
@@ -110,60 +110,62 @@ const (
 )
 
 var (
-	_setupStatus sync.Once
-	statusFile   *os.File
+	//_setupStatus sync.Once
+	statusWriter *os.File
+	//statusWriter io.Writer
 )
 
-func setupStatus() {
-	_setupStatus.Do(func() {
-		if *statusFdOpt <= 0 {
-			return
-		}
+/*
+	func setupStatus() {
+		_setupStatus.Do(func() {
+			if *statusFdOpt <= 0 {
+				return
+			}
 
-		const (
-			unixStdout = 1
-			unixStderr = 2
-		)
+			const (
+				unixStdout = 1
+				unixStderr = 2
+			)
 
-		// Even though Windows uses different numbers, we always equate 1/2 with
-		// stdout/stderr because Git always passes `--status-fd=1`.
-		switch *statusFdOpt {
-		case unixStdout:
-			statusFile = os.Stdout
-		case unixStderr:
-			statusFile = os.Stderr
-		default:
-			// TODO: debugging output if this fails
-			statusFile = os.NewFile(uintptr(*statusFdOpt), "status")
-		}
-	})
-}
-
-func (s status) emitf(format string, args ...interface{}) {
-	setupStatus()
-
-	if statusFile == nil {
-		return
+			// Even though Windows uses different numbers, we always equate 1/2 with
+			// stdout/stderr because Git always passes `--status-fd=1`.
+			switch *statusFdOpt {
+			case unixStdout:
+				statusWriter = os.Stdout
+			case unixStderr:
+				statusWriter = os.Stderr
+			default:
+				// TODO: debugging output if this fails
+				statusWriter = os.NewFile(uintptr(*statusFdOpt), "status")
+			}
+		})
 	}
+*/
+func (s status) emitf(writer io.Writer, format string, args ...interface{}) {
+	//setupStatus()
+
+	//if statusWriter == nil {
+	//	return
+	//}
 
 	const prefix = "[GNUPG:] "
-	statusFile.WriteString(prefix)
-	statusFile.WriteString(string(s))
-	fmt.Fprintf(statusFile, " "+format+"\n", args...)
+	fmt.Fprintf(writer, prefix)
+	fmt.Fprintf(writer, string(s))
+	fmt.Fprintf(writer, " "+format+"\n", args...)
 }
 
-func (s status) emit() {
-	setupStatus()
+func (s status) emit(writer io.Writer) {
+	//setupStatus()
 
-	if statusFile == nil {
-		return
-	}
+	//if statusWriter == nil {
+	//	return
+	//}
 
 	const prefix = "[GNUPG:] "
-	statusFile.WriteString(prefix + string(s) + "\n")
+	fmt.Fprintf(writer, prefix+string(s)+"\n")
 }
 
-func emitSigCreated(cert *x509.Certificate, isDetached bool) {
+func emitSigCreated(writer io.Writer, cert *x509.Certificate, isDetached bool) {
 	// SIG_CREATED arguments
 	var (
 		sigType                    string
@@ -201,25 +203,25 @@ func emitSigCreated(cert *x509.Certificate, isDetached bool) {
 	now = time.Now().Unix()
 	fpr = certHexFingerprint(cert)
 
-	sSigCreated.emitf("%s %d %d %02x %d %s", sigType, pkAlgo, hashAlgo, sigClass, now, fpr)
+	sSigCreated.emitf(writer, "%s %d %d %02x %d %s", sigType, pkAlgo, hashAlgo, sigClass, now, fpr)
 }
 
-func emitGoodSig(chains [][][]*x509.Certificate) {
+func emitGoodSig(writer io.Writer, chains [][][]*x509.Certificate) {
 	cert := chains[0][0][0]
 	subj := cert.Subject.String()
 	fpr := certHexFingerprint(cert)
 
-	sGoodSig.emitf("%s %s", fpr, subj)
+	sGoodSig.emitf(writer, "%s %s", fpr, subj)
 }
 
-func emitBadSig(chains [][][]*x509.Certificate) {
+func emitBadSig(writer io.Writer, chains [][][]*x509.Certificate) {
 	cert := chains[0][0][0]
 	subj := cert.Subject.String
 	fpr := certHexFingerprint(cert)
 
-	sBadSig.emitf("%s %s", fpr, subj)
+	sBadSig.emitf(writer, "%s %s", fpr, subj)
 }
 
-func emitTrustFully() {
-	sTrustFully.emitf("0 shell")
+func emitTrustFully(writer io.Writer) {
+	sTrustFully.emitf(writer, "0 shell")
 }

@@ -13,17 +13,18 @@ import (
 	"github.com/pkg/errors"
 )
 
-func commandVerify() error {
-	sNewSig.emit()
+func commandVerify(reader io.Reader, writer io.Writer, errorWriter io.Writer) error {
+
+	sNewSig.emit(writer)
 
 	if len(fileArgs) < 2 {
-		return verifyAttached()
+		return verifyAttached(reader, writer)
 	}
 
-	return verifyDetached()
+	return verifyDetached(reader, writer, errorWriter)
 }
 
-func verifyAttached() error {
+func verifyAttached(reader io.Reader, writer io.Writer) error {
 	var (
 		f   io.ReadCloser
 		err error
@@ -34,13 +35,13 @@ func verifyAttached() error {
 		if f, err = os.Open(fileArgs[0]); err != nil {
 			return errors.Wrapf(err, "failed to open signature file (%s)", fileArgs[0])
 		}
+		reader = io.Reader(f)
 		defer f.Close()
 	} else {
-		f = stdin
 	}
 
 	buf := new(bytes.Buffer)
-	if _, err = io.Copy(buf, f); err != nil {
+	if _, err = io.Copy(buf, reader); err != nil {
 		return errors.Wrap(err, "failed to read signature")
 	}
 
@@ -62,10 +63,10 @@ func verifyAttached() error {
 	chains, err := sd.Verify(verifyOpts())
 	if err != nil {
 		if len(chains) > 0 {
-			emitBadSig(chains)
+			emitBadSig(writer, chains)
 		} else {
 			// TODO: We're omitting a bunch of arguments here.
-			sErrSig.emit()
+			sErrSig.emit(writer)
 		}
 
 		return errors.Wrap(err, "failed to verify signature")
@@ -78,30 +79,32 @@ func verifyAttached() error {
 	)
 
 	fmt.Fprintf(stderr, "smimesign: Signature made using certificate ID 0x%s\n", fpr)
-	emitGoodSig(chains)
+	emitGoodSig(writer, chains)
 
 	// TODO: Maybe split up signature checking and certificate checking so we can
 	// output something more meaningful.
 	fmt.Fprintf(stderr, "smimesign: Good signature from \"%s\"\n", subj)
-	emitTrustFully()
+	emitTrustFully(writer)
 
 	return nil
 }
 
-func verifyDetached() error {
+func verifyDetached(reader io.Reader, writer io.Writer, errorWriter io.Writer) error {
 	var (
-		f   io.ReadCloser
-		err error
+		f              io.ReadCloser
+		err            error
+		message_reader io.Reader
 	)
-
+	message_reader = reader
 	// Read in signature
 	if f, err = os.Open(fileArgs[0]); err != nil {
 		return errors.Wrapf(err, "failed to open signature file (%s)", fileArgs[0])
 	}
+	reader = io.Reader(f)
 	defer f.Close()
 
 	buf := new(bytes.Buffer)
-	if _, err = io.Copy(buf, f); err != nil {
+	if _, err = io.Copy(buf, reader); err != nil {
 		return errors.Wrap(err, "failed to read signature file")
 	}
 
@@ -121,27 +124,28 @@ func verifyDetached() error {
 
 	// Read in signed data
 	if fileArgs[1] == "-" {
-		f = stdin
+		//f = stdin
 	} else {
 		if f, err = os.Open(fileArgs[1]); err != nil {
 			errors.Wrapf(err, "failed to open message file (%s)", fileArgs[1])
 		}
 		defer f.Close()
+		message_reader = io.Reader(f)
 	}
 
 	// Verify signature
 	buf.Reset()
-	if _, err = io.Copy(buf, f); err != nil {
+	if _, err = io.Copy(buf, message_reader); err != nil {
 		return errors.Wrap(err, "failed to read message file")
 	}
 
 	chains, err := sd.VerifyDetached(buf.Bytes(), verifyOpts())
 	if err != nil {
 		if len(chains) > 0 {
-			emitBadSig(chains)
+			emitBadSig(writer, chains)
 		} else {
 			// TODO: We're omitting a bunch of arguments here.
-			sErrSig.emit()
+			sErrSig.emit(writer)
 		}
 
 		return errors.Wrap(err, "failed to verify signature")
@@ -153,13 +157,13 @@ func verifyDetached() error {
 		subj = cert.Subject.String()
 	)
 
-	fmt.Fprintf(stderr, "smimesign: Signature made using certificate ID 0x%s\n", fpr)
-	emitGoodSig(chains)
+	fmt.Fprintf(errorWriter, "smimesign: Signature made using certificate ID 0x%s\n", fpr)
+	emitGoodSig(writer, chains)
 
 	// TODO: Maybe split up signature checking and certificate checking so we can
 	// output something more meaningful.
-	fmt.Fprintf(stderr, "smimesign: Good signature from \"%s\"\n", subj)
-	emitTrustFully()
+	fmt.Fprintf(errorWriter, "smimesign: Good signature from \"%s\"\n", subj)
+	emitTrustFully(writer)
 
 	return nil
 }
